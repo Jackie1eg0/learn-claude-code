@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Agent Atlas · 信息流实验室</title><link rel="stylesheet" href="/style.css"><script defer src="/app.js"></script></head>
+<body>
+<aside class="sidebar">
+  <a class="brand" href="/"><span class="brand-icon">a<span>↗</span></span><span>Agent Atlas<small>信息流实验室</small></span></a>
+  <div class="nav-heading">LEARN BY TRACING <span>17 CHAPTERS</span></div>
+  <nav id="chapters" aria-label="课程章节"></nav>
+  <div class="sidebar-foot"><span class="status-dot"></span> 本地运行 · 数据留在此设备<small>从一个循环，到完整的 Harness</small></div>
+</aside>
+<main>
+  <header><div class="breadcrumb">Learn Claude Code <span>/</span> <span id="breadcrumb">s01</span></div><div class="header-right"><button id="helpButton" class="text-button">使用指南 ↗</button><span class="local-label">LOCAL LAB</span></div></header>
+  <section class="intro"><div><div class="eyebrow" id="eyebrow">01 / THE AGENT LOOP</div><h1 id="title">看见 Agent 的每一步</h1><p id="subtitle">理解信息如何流动，比记住代码更重要。</p></div><div class="mode-switch" role="group" aria-label="数据模式"><button data-mode="demo" class="selected">教学演示</button><button data-mode="live">真实记录 <span class="live-dot"></span></button></div></section>
+  <section class="insight"><span class="insight-icon">✧</span><div><strong id="insightLabel">这一章，抓住一个关键点</strong><p id="insight"></p></div></section>
+  <div class="workspace">
+    <section class="flow-panel panel">
+      <div class="panel-heading"><h2>信息流动 <span>FLOW</span></h2><span class="badge" id="modeLabel">教学示例 · 非实际 API 调用</span></div>
+      <div class="participants" id="participants">
+        <div class="participant" data-actor="user"><span class="actor-icon">◎</span><strong>用户</strong><small>提出目标</small></div>
+        <div class="participant" data-actor="agent"><span class="actor-icon">⌘</span><strong>Agent 程序</strong><small>组织 · 执行 · 循环</small></div>
+        <div class="participant" data-actor="llm"><span class="actor-icon">✳</span><strong>LLM</strong><small>理解 · 决策</small></div>
+        <div class="participant" data-actor="tool"><span class="actor-icon">⚒</span><strong>工具 / 运行时</strong><small>行动 · 返回结果</small></div>
+      </div>
+      <div class="flow-stage"><svg id="flowSvg" viewBox="0 0 800 94" role="img" aria-label="当前步骤的信息流方向"></svg><div id="flowCaption"></div></div>
+      <div class="playback"><button id="reset" title="回到第一步" aria-label="回到第一步">↺</button><button id="prev" title="上一步" aria-label="上一步">‹</button><button id="play" class="primary">▶ 播放</button><button id="next" title="下一步" aria-label="下一步">›</button><span class="step-counter" id="counter">01 / 08</span><select id="speed" aria-label="播放速度"><option value="2400">0.5×</option><option value="1200" selected>1×</option><option value="600">2×</option></select></div>
+      <input id="scrubber" type="range" min="0" max="1" value="0" aria-label="回放进度">
+      <div class="timeline-head"><h3>执行时间线</h3><span id="eventCount"></span><label class="follow-label" hidden><input type="checkbox" id="follow" checked> 跟随新事件</label></div>
+      <div id="timeline" class="timeline" aria-label="执行步骤"></div>
+      <div class="timeline-footer"><span>点击步骤，检查传递的数据</span><button id="export" class="text-button">导出 JSON ↓</button></div>
+    </section>
+    <section class="detail-panel panel"><div class="panel-heading"><h2>消息检查器 <span>INSPECTOR</span></h2><span id="stepTag" class="badge">STEP 01</span></div><div class="detail-content"><div id="direction" class="direction"></div><h2 id="eventTitle"></h2><p id="explanation" class="explanation"></p><div id="eventMeta" class="event-meta"></div></div>
+      <div class="tabs" role="tablist"><button role="tab" data-tab="payload" class="selected">消息 / 参数</button><button role="tab" data-tab="context">上下文</button><button role="tab" data-tab="source">对应源码</button></div>
+      <div id="tabContent" class="tab-content"></div>
+      <div class="protocol-note"><strong>记住这条边界</strong><p>LLM 返回 <code>tool_use</code> 是请求执行。真正调用函数、检查权限、拼接 <code>tool_result</code> 的是 Agent 程序。</p></div>
+    </section>
+  </div>
+  <section class="bottom-grid"><div class="panel dictionary"><div class="panel-heading"><h2>协议速查 <span>CHEAT SHEET</span></h2></div><div class="dict-grid"><div><code>system</code><p>角色、行为约束与运行环境</p></div><div><code>messages[]</code><p>用户输入、模型响应、工具结果</p></div><div><code>tools[]</code><p>工具名称、说明、输入 Schema</p></div><div><code>tool_use.id</code><p>配对 tool_result.tool_use_id</p></div><div><code>max_tokens</code><p>本次模型输出的 token 上限</p></div><div><code>stop_reason</code><p>响应结束原因；循环还会检查内容块</p></div></div></div><div class="panel source-card"><span class="eyebrow">READ THE IMPLEMENTATION</span><h3>从信息流，回到源码。</h3><p id="sourcePath"></p><p>源码实时读取自本地文件。教学场景复用仓库示例；真实记录保存 SDK 调用边界的数据。</p><button id="viewSource" class="text-button">查看本章源码 →</button></div></section>
+  <footer>AGENT ATLAS <span>理解决策与执行之间发生的事。</span><span>⌁ 本地学习工具</span></footer>
+</main>
+<dialog id="help"><div class="dialog-head"><h2>开始探索 Agent 信息流</h2><button id="closeHelp" aria-label="关闭">×</button></div><p>教学演示无需密钥，也不会运行工具。先选择章节，再点击「下一步」或「播放」。</p><h3>录制你自己的运行</h3><p>在项目根目录，使用已安装依赖的虚拟环境执行：</p><pre id="recordCommand"></pre><p>在终端输入问题、处理权限确认；网页切换到「真实记录」，每两秒自动读取本章最新的录制。各章节仍使用原来的 .env 和运行逻辑，会正常调用 API 与执行工具。</p><h3>如何读这张图</h3><p>一行代表一个可观察事件。先看箭头的发送方与接收方，再看右侧 JSON。真实模式中，LLM 请求的 <code>messages</code> 是发送时的快照；<code>call_id</code> 对齐请求与响应，线程名区分后台执行。</p><p>高级章节的教学场景是关键事件节选，并不包含每次完整请求；不会把缺少的上下文补成真实记录。完整参数请在真实模式中查看。</p><p>录制器支持本项目使用的 Anthropic Messages 非流式调用；函数事件属于辅助观测，异步函数不伪造调用完成事件。密钥会脱敏，提示词和工具输出仍可能含私人内容，分享导出文件前请检查。</p></dialog>
+<div id="toast" role="status"></div>
+</body></html>
