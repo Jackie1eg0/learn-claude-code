@@ -63,6 +63,10 @@ ENVIRONMENT_PROMPT = (
     else "Unix-like: the bash tool runs the system shell"
 )
 
+# s03新增权限审批模块,在Agent调用Tool之前会进行权限核查,危险命令需要人工审批,审核通过才可执行
+#   在System Prompt中添加 "Do not ask for approval yourself" 
+#   避免LLM自己发起口头审批,否则LLM可能输出"删除文件可能有风险,确实要继续嘛？"
+# 当task涉及破坏性操作时,LLM提出tool_use请求,Harness会向用户请求审批。
 SYSTEM = (
     f"You are a coding agent at {WORKDIR}. Environment: {ENVIRONMENT_PROMPT}. "
     "Use tools to solve tasks. Do not ask for approval yourself. "
@@ -132,7 +136,7 @@ def run_glob(pattern: str) -> str:
 
 
 # -- From s02 (unchanged): tool definitions and dispatch --
-
+#   TOOLS定义,符合Claude规范;   工具的分发,把tool_name与实际tool_fuc()对应;
 TOOLS = [
     {"name": "bash", "description": "Run a shell command.",
      "input_schema": {"type": "object", "properties": {"command": {"type": "string"}}, "required": ["command"]}},
@@ -153,10 +157,13 @@ TOOL_HANDLERS = {
 
 
 # -- New in s03: three-gate permission pipeline --
+# 使用三道权限门去管理Tool的使用
 
 # Gate 1: Hard deny list - always forbidden
+# 明确只要涉及到危险指令:删除文件、获得更高权限、关闭系统、创建文件系统等...统统硬性拒绝
 DENY_LIST = ["rm -rf /", "sudo", "shutdown", "reboot", "mkfs", "dd if=", "> /dev/sda"]
 
+# 确定command指令涉及到deny list中危险指令
 def check_deny_list(command: str) -> str | None:
     for pattern in DENY_LIST:
         if pattern in command:
@@ -165,6 +172,8 @@ def check_deny_list(command: str) -> str | None:
 
 
 # Gate 2: Rule matching - context-dependent checks
+# 正则表达式来匹配:出现在字符串开头、或者某些命令分隔符后的rm、del删除命令,不区分大小写
+# 这些命令可能涉及到高风险操作
 DESTRUCTIVE_COMMAND_WORD = re.compile(
     r"(?i)(?:^|[;&|()\n])\s*(?:rm|del)(?=\s|$|[;&|()])"
 )
@@ -173,7 +182,8 @@ DESTRUCTIVE_COMMAND_WORD = re.compile(
 def contains_destructive_command(command: str) -> bool:
     return bool(DESTRUCTIVE_COMMAND_WORD.search(command))
 
-
+# 不同的tool增加不同的审核规则: 对于read_file、write_file、edit_file而言,检查是否对工作目录下文件操作读/写/改
+# check为Bool类型,为True说明检查到有高风险操作,得提交人工审批
 PERMISSION_RULES = [
     {"tools": ["read_file", "write_file", "edit_file"],
      "check": lambda args: not (WORKDIR / args.get("path", "")).resolve().is_relative_to(WORKDIR),
@@ -184,6 +194,7 @@ PERMISSION_RULES = [
      "message": "Potentially destructive command"},
 ]
 
+# 根据tool_name选择对应审查规则,根据args审查是否有越界行为,有返回Reason,无返回None
 def check_rules(tool_name: str, args: dict) -> str | None:
     for rule in PERMISSION_RULES:
         if tool_name in rule["tools"] and rule["check"](args):
@@ -192,6 +203,8 @@ def check_rules(tool_name: str, args: dict) -> str | None:
 
 
 # Gate 3: User approval - wait for confirmation after rule match
+#         用户审查机制,当Gate1通过,但Gate2不过时,触发用户审查;给出审查的原因 1)工作区外读写操作 2)涉及破坏性操作
+#         当Gate1不过时,直接返回Reason:on deny list;    当Gate1、Gate2都通过时,直接执行
 def ask_user(tool_name: str, args: dict, reason: str) -> str:
     print(f"\n\033[33m[permission] {reason}\033[0m")
     print(f"   Tool: {tool_name}({args})")
@@ -200,13 +213,18 @@ def ask_user(tool_name: str, args: dict, reason: str) -> str:
 
 
 # Pipeline: all three gates chained
+# 根据LLM Response当中的Tool Block, 里面的input属性是向Tool传递参数,name是Tool_name
 def check_permission(block) -> bool:
+    # GATE1:如果是Bash工具,查看是否涉及危险命令
     if block.name == "bash":
         reason = check_deny_list(block.input.get("command", ""))
+        # 涉及到危险指令,给出"On Deny List"作为Reason
         if reason:
             print(f"\n\033[31m[blocked] {reason}\033[0m")
             return False
+    # Gate2:查看调用Tool_Args是否涉及高风险操作: 1)当前工作目录外读写 2)涉及高风险命令
     reason = check_rules(block.name, block.input)
+    # Gate3: Gate1通过、Gate2不过请求人工审查
     if reason:
         decision = ask_user(block.name, block.input, reason)
         if decision == "deny":
@@ -235,11 +253,14 @@ def agent_loop(messages: list):
             print(f"\033[36m> {block.name}\033[0m")
 
             # s03 change: run through permission pipeline before executing
+            # 若check_permission结果为True,说明通过审查,可执行Tool;
+            # 若为False Agent也需要向LLM汇报拒绝原因,封装到User Messages中Content部分
             if not check_permission(block):
                 results.append({"type": "tool_result", "tool_use_id": block.id,
                                 "content": "Permission denied."})
                 continue
 
+            # 通过Check Permission的Tools像s02那样调用,把tool_result封装到User Message中
             handler = TOOL_HANDLERS.get(block.name)
             output = handler(**block.input) if handler else f"Unknown: {block.name}"
             print(str(output)[:200])
