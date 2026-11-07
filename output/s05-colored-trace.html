@@ -1,0 +1,145 @@
+<style>
+#s05-color-trace { color: var(--foreground); }
+#s05-color-trace .legend { display: flex; flex-wrap: wrap; gap: calc(var(--font-size-base) * .75); margin-block: var(--font-size-base); }
+#s05-color-trace .entry { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: calc(var(--font-size-base) * .5); margin-block: calc(var(--font-size-base) * .5); overflow-wrap: anywhere; }
+#s05-color-trace .tag { font-weight: 500; color: var(--mark, var(--foreground)); white-space: nowrap; }
+#s05-color-trace .tag::before { content: ''; display: inline-block; width: .65em; height: .65em; margin-right: .4em; border-radius: 50%; background: var(--mark); }
+#s05-color-trace .llm { --mark: var(--blue); }
+#s05-color-trace .tool { --mark: var(--purple); }
+#s05-color-trace .todo { --mark: var(--green); }
+#s05-color-trace .agent { --mark: var(--orange); }
+#s05-color-trace .out { --mark: var(--muted-foreground); }
+#s05-color-trace .error { --mark: var(--red); }
+#s05-color-trace details { margin-block: var(--font-size-base); }
+#s05-color-trace summary { font-weight: 500; padding-block: calc(var(--font-size-base) * .5); }
+#s05-color-trace pre { white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; color: var(--foreground); }
+#s05-color-trace .meta { color: var(--muted-foreground); margin-block: calc(var(--font-size-base) * .5); }
+</style>
+<div id="s05-color-trace">
+  <h2>s05 · 真实交互彩色标注</h2>
+  <div class="meta">10 轮 LLM 请求 · 11 次工具调用 · 4 次任务列表更新</div>
+  <div class="legend" aria-label="颜色图例">
+    <span class="tag llm">LLM 请求工具</span><span class="tag tool">工具执行</span><span class="tag todo">TODO 更新</span><span class="tag agent">Agent / Hook</span><span class="tag out">返回结果</span><span class="tag error">错误</span>
+  </div>
+  <div class="entry out"><span class="tag">用户</span><div>阅读 hello.py → 检查注解、文档字符串、main 保护 → 总结建议；不修改文件，每步更新任务状态。</div></div>
+  <div class="entry agent"><span class="tag">自动触发</span><code>[HOOK] UserPromptSubmit: working in …/learn-claude-code</code></div>
+
+  <details open>
+    <summary class="cursor-interaction">第 1 轮 · 确认文件位置，建立任务列表</summary>
+    <div class="meta">请求事件 6 → 响应事件 7</div>
+    <div class="entry llm"><span class="tag">LLM</span><div>同一响应请求 bash + todo_write；由 Agent 依次执行。</div></div>
+    <div class="entry tool"><span class="tag">工具 #1</span><code>[HOOK] bash(['ls -la; … ls -la s05_todo_write/example …'])</code></div>
+    <div class="entry out"><span class="tag">返回</span><div>目录信息：hello.py 存在，大小 85 字节。</div></div>
+    <div class="entry tool"><span class="tag">工具 #2</span><code>[HOOK] todo_write(todos=[…])</code></div>
+    <div class="entry todo"><span class="tag">更新 ①</span><pre>## Current Tasks
+[&gt;] 阅读 hello.py                         in_progress
+[ ] 检查注解 / 文档字符串 / main 保护     pending
+[ ] 总结改进建议（不修改文件）            pending
+(0/3 completed)</pre></div>
+    <div class="entry agent"><span class="tag">轮末</span><div>rounds_since_todo = 0；两个工具结果一起提交给第 2 轮。</div></div>
+  </details>
+  <hr>
+  <details open>
+    <summary class="cursor-interaction">第 2 轮 · 读取文件</summary>
+    <div class="meta">请求事件 20 → 响应事件 21</div>
+    <div class="entry llm"><span class="tag">LLM</span><div>请求 read_file，读取目标文件内容。</div></div>
+    <div class="entry tool"><span class="tag">工具 #3</span><code>[HOOK] read_file(['s05_todo_write/example/hello.py'])</code></div>
+    <div class="entry out"><span class="tag">返回</span><pre>def greet(name):
+    message = "Hello, " + name
+    print(message)
+
+
+greet("Claude")</pre></div>
+    <div class="entry agent"><span class="tag">轮末</span><div>计数器 = 1；列表不变，任务 1 仍为 in_progress。</div></div>
+  </details>
+  <hr>
+  <details open>
+    <summary class="cursor-interaction">第 3 轮 · 阅读完成，开始检查</summary>
+    <div class="meta">请求事件 28 → 响应事件 29</div>
+    <div class="entry llm"><span class="tag">LLM</span><div>收到文件内容后，请求 todo_write + bash。</div></div>
+    <div class="entry tool"><span class="tag">工具 #4</span><code>[HOOK] todo_write(todos=[…])</code></div>
+    <div class="entry todo"><span class="tag">更新 ②</span><pre>[x] 阅读 hello.py                         completed
+[&gt;] 检查注解 / 文档字符串 / main 保护     in_progress
+[ ] 总结改进建议（不修改文件）            pending
+(1/3 completed)</pre></div>
+    <div class="entry tool"><span class="tag">工具 #5</span><code>[HOOK] bash(['… wc -l …; … cat -A … | head -20'])</code></div>
+    <div class="entry out"><span class="tag">返回</span><div>行数：6。</div></div>
+    <div class="entry error"><span class="tag">错误</span><code>cat: illegal option -- A</code></div>
+    <div class="entry agent"><span class="tag">轮末</span><div>计数器 = 0；错误文本随工具结果传入下一轮，循环继续。</div></div>
+  </details>
+  <hr>
+  <details open>
+    <summary class="cursor-interaction">第 4 轮 · AST 静态检查</summary>
+    <div class="meta">请求事件 42 → 响应事件 43</div>
+    <div class="entry llm"><span class="tag">LLM</span><div>请求 bash 运行 Python AST 检查脚本。</div></div>
+    <div class="entry tool"><span class="tag">工具 #6</span><code>[HOOK] bash(['… .venv/bin/python - …'])</code></div>
+    <div class="entry out"><span class="tag">返回</span><pre>模块 / 函数 docstring: None
+参数注解: {'name': None}；返回注解: None
+顶层语句: ['FunctionDef', 'Expr']
+main 保护: False</pre></div>
+    <div class="entry agent"><span class="tag">轮末</span><div>计数器 = 1；列表不变，任务 2 仍为 in_progress。</div></div>
+  </details>
+  <hr>
+  <details open>
+    <summary class="cursor-interaction">第 5 轮 · 实际导入与调用验证</summary>
+    <div class="meta">请求事件 50 → 响应事件 51</div>
+    <div class="entry llm"><span class="tag">LLM</span><div>请求 import hello、greet(42)，并读取 code.py 前 30 行。</div></div>
+    <div class="entry tool"><span class="tag">工具 #7</span><code>[HOOK] bash(['… .venv/bin/python -c …; … sed -n …'])</code></div>
+    <div class="entry out"><span class="tag">返回</span><pre>导入时打印: Hello, Claude
+greet.__annotations__: {}；greet.__doc__: None</pre></div>
+    <div class="entry error"><span class="tag">实测异常</span><code>greet(42) → TypeError: can only concatenate str (not "int") to str</code></div>
+    <div class="entry agent"><span class="tag">轮末</span><div>计数器 = 2；列表不变。</div></div>
+  </details>
+  <hr>
+  <details open>
+    <summary class="cursor-interaction">第 6 轮 · 对照代码风格，触发三轮提醒</summary>
+    <div class="meta">请求事件 58 → 响应事件 59</div>
+    <div class="entry llm"><span class="tag">LLM</span><div>请求搜索 code.py 中的类型注解和 main 保护。</div></div>
+    <div class="entry tool"><span class="tag">工具 #8</span><code>[HOOK] bash(['… grep -nE … s05_todo_write/code.py | head -20'])</code></div>
+    <div class="entry out"><span class="tag">返回</span><div>匹配的源码行，包括多处函数参数与返回值注解。</div></div>
+    <div class="entry agent"><span class="tag">自动提醒</span><div>第 4、5、6 轮均未调用 todo_write：计数器 2 → 3，追加提醒后重置为 0。</div></div>
+    <div class="entry agent"><span class="tag">注入文本</span><code>&lt;reminder&gt;Update your todos.&lt;/reminder&gt;</code></div>
+    <div class="entry out"><span class="tag">日志位置</span><div>第 7 轮请求事件 66 的 messages；原终端没有单独打印这条提醒。</div></div>
+  </details>
+  <hr>
+  <details open>
+    <summary class="cursor-interaction">第 7 轮 · 检查完成，开始总结</summary>
+    <div class="meta">请求事件 66 → 响应事件 67</div>
+    <div class="entry llm"><span class="tag">LLM</span><div>收到检查结果和 reminder 后，请求 todo_write。</div></div>
+    <div class="entry tool"><span class="tag">工具 #9</span><code>[HOOK] todo_write(todos=[…])</code></div>
+    <div class="entry todo"><span class="tag">更新 ③</span><pre>[x] 阅读 hello.py                         completed
+[x] 检查注解 / 文档字符串 / main 保护     completed
+[&gt;] 总结改进建议（不修改文件）            in_progress
+(2/3 completed)</pre></div>
+    <div class="entry agent"><span class="tag">轮末</span><div>计数器 = 0。</div></div>
+  </details>
+  <hr>
+  <details open>
+    <summary class="cursor-interaction">第 8 轮 · 检查目标文件是否修改</summary>
+    <div class="meta">请求事件 74 → 响应事件 75</div>
+    <div class="entry llm"><span class="tag">LLM</span><div>请求检查 example 目录的 Git 状态和 hello.py 的文件信息。</div></div>
+    <div class="entry tool"><span class="tag">工具 #10</span><code>[HOOK] bash(['… git status --porcelain s05_todo_write/example/; … ls -l …'])</code></div>
+    <div class="entry out"><span class="tag">返回</span><div>指定目录的 Git 状态输出为空；hello.py：85 字节，mtime 为 Oct 29。</div></div>
+    <div class="entry agent"><span class="tag">轮末</span><div>计数器 = 1；列表不变，任务 3 仍为 in_progress。</div></div>
+  </details>
+  <hr>
+  <details open>
+    <summary class="cursor-interaction">第 9 轮 · 标记全部完成</summary>
+    <div class="meta">请求事件 82 → 响应事件 83</div>
+    <div class="entry llm"><span class="tag">LLM</span><div>请求 todo_write，将任务 3 设为 completed。</div></div>
+    <div class="entry tool"><span class="tag">工具 #11</span><code>[HOOK] todo_write(todos=[…])</code></div>
+    <div class="entry todo"><span class="tag">更新 ④</span><pre>[x] 阅读 hello.py                         completed
+[x] 检查注解 / 文档字符串 / main 保护     completed
+[x] 总结改进建议（不修改文件）            completed
+(3/3 completed)</pre></div>
+    <div class="entry agent"><span class="tag">轮末</span><div>计数器 = 0；完成状态返回 LLM，最终报告尚未打印。</div></div>
+  </details>
+  <hr>
+  <details open>
+    <summary class="cursor-interaction">第 10 轮 · 最终回答，结束循环</summary>
+    <div class="meta">请求事件 90 → 响应事件 91</div>
+    <div class="entry llm"><span class="tag">LLM</span><div>返回检查结果和改进建议；没有 tool_use，stop_reason = end_turn。</div></div>
+    <div class="entry agent"><span class="tag">Stop Hook</span><code>[HOOK] Stop: session used 11 tool calls</code></div>
+    <div class="entry out"><span class="tag">终端输出</span><div>三个步骤全部完成。文件未被修改……（检查结果及建议）</div></div>
+  </details>
+</div>
