@@ -4,6 +4,8 @@ s07_skill_loading.py - Skill Loading
 
 The system prompt contains a catalog of skill names and descriptions.
 The model loads the full SKILL.md only when it calls load_skill.
+======== SystemPrompt包含关于SKILL的Name、Description描述清单 ========
+         可使用load_skill得到该SKILL完整的SKILL.md文件             
 
     skills/                    Startup
     +------------------+       +------------------+
@@ -43,7 +45,7 @@ if os.getenv("ANTHROPIC_BASE_URL"):
     os.environ.pop("ANTHROPIC_AUTH_TOKEN", None)
 
 WORKDIR = Path.cwd()
-SKILLS_DIR = WORKDIR / "skills"
+SKILLS_DIR = WORKDIR / "skills"     # SKILLS文件夹的路径,存放各种SKILL
 client = Anthropic(base_url=os.getenv("ANTHROPIC_BASE_URL"))
 MODEL = os.environ["MODEL_ID"]
 ENVIRONMENT_PROMPT = (
@@ -57,17 +59,26 @@ ENVIRONMENT_PROMPT = (
 # -- Skill catalog --
 
 class SkillLoader:
+    # 两层提供技能信息：catalog() 给 System Prompt 提供SKILL_Name和Description，
+    # load(name): 在模型调用 load_skill 工具时返回完整 SKILL.md。
     def __init__(self, skills_dir: Path):
         self.skills_dir = skills_dir
+        # 以name为键，缓存name、description和Markdown正文。
         self.skills: dict[str, dict[str, str]] = {}
+        # 初始化时已经读取文件；“按需加载”指按需把Skill的Content加载进Context Window。
         self.scan()
 
     @staticmethod
     def parse_frontmatter(text: str) -> tuple[dict, str]:
+        # 将 SKILL.md 开头由 --- 包围的 YAML 元数据与正文分开，
+        # 供 scan() 提取SKILL的name和description；返回 (元数据字典, 正文)。
+        # 缺少完整的头部分隔符时，返回空字典，并将全文保留为正文。
         lines = text.splitlines(keepends=True)
         if not lines or lines[0].rstrip("\r\n") != "---":
             return {}, text
 
+        # Front Matter查找结束的---分隔线,若无则认为是不合法的Front Matter
+        # 返回空元数据dict与正文
         closing_index = next(
             (index for index, line in enumerate(lines[1:], start=1)
              if line.rstrip("\r\n") == "---"),
@@ -75,9 +86,11 @@ class SkillLoader:
         )
         if closing_index is None:
             return {}, text
-
+        
+        # 提取Frontmatter(name与description)与Body部分(Markdown内容)
         frontmatter = "".join(lines[1:closing_index])
         body = "".join(lines[closing_index + 1:]).strip()
+        # 把metadata(YAML)解析为Python字典,进行容错处理
         try:
             metadata = yaml.safe_load(frontmatter) or {}
         except yaml.YAMLError:
@@ -87,25 +100,34 @@ class SkillLoader:
         return metadata, body
 
     def scan(self):
+        # 重新扫描时先清空旧缓存，避免已经删除的技能仍出现在目录中。
         self.skills.clear()
         if not self.skills_dir.exists():
             return
 
         skills_root = self.skills_dir.resolve()
+        # 只扫描 skills/<技能目录>/SKILL.md，排序使加载顺序稳定。
         for manifest in sorted(self.skills_dir.glob("*/SKILL.md")):
+            # resolve() 解析符号链接，跳过实际指向SKILL根目录之外的文件。
             if (not manifest.is_file()
                     or not manifest.resolve().is_relative_to(skills_root)):
                 continue
+            # 得到SKILL中的metadata（name、description)与Body(Markdown文本)
             content = manifest.read_text(encoding="utf-8")
             metadata, body = self.parse_frontmatter(content)
+
+            # 优先使用 YAML 中非空的 name；否则使用 SKILL.md 所在目录名。
             raw_name = metadata.get("name")
             name = raw_name.strip() if isinstance(raw_name, str) else ""
             name = name or manifest.parent.name
+            # 优先使用 description；缺失、为空或类型不对时，取正文首行。
             raw_description = metadata.get("description")
             description = (raw_description.strip()
                            if isinstance(raw_description, str) else "")
             description = description or body.split("\n", 1)[0]
+            # 去掉开头的 Markdown 标题符号，并将多余空白合并成单个空格。
             description = " ".join(str(description).lstrip("# ").split())
+            # content 保留含 YAML 头的完整原文；同名技能会被后扫描的覆盖。
             self.skills[name] = {
                 "name": name,
                 "description": description,
@@ -113,6 +135,7 @@ class SkillLoader:
             }
 
     def catalog(self) -> str:
+        # 生成简短SKILL清单,包含name与discription,让模型先判断是否适用，避免全文占用。
         if not self.skills:
             return "(no skills found)"
         return "\n".join(
@@ -121,16 +144,21 @@ class SkillLoader:
         )
 
     def load(self, name: str) -> str:
+        # 按注册名精确查找，返回启动扫描时缓存的全文(Content = metadata+Body)，不重新读磁盘。
+        # 工具分发器会把返回字符串包装成 tool_result，供下一轮 LLM 使用。
         skill = self.skills.get(name)
         if skill:
             return skill["content"]
+        # 未找到时返回错误文本和可用名称，方便模型修正下一次调用。
         available = ", ".join(self.skills) or "none"
         return f"Error: Unknown skill '{name}'. Available: {available}"
 
-
+# 实例化时根据SKILL_DIR,读取SKILLS下的所有SKILL,
+# self.skills会包含name、discription及content(YAML原文件)
 SKILL_LOADER = SkillLoader(SKILLS_DIR)
 
-
+# 把Agent能用的SKILL清单(name+discription)加载进System Prompt中
+# 并且可使用load_skill(name)去得到SKILL的完整Content
 def build_system_prompt() -> str:
     return (
         f"You are a coding agent at {WORKDIR}. Environment: {ENVIRONMENT_PROMPT}. "
@@ -205,7 +233,8 @@ def run_glob(pattern: str) -> str:
     except Exception as e:
         return f"Error: {e}"
 
-
+# SKILL的加载也是一种Tool,加载SKILL.md的Content到Context Window中
+# 以Tool_Result的形式加载进Message中作为历史对话
 TOOLS = [
     {"name": "bash", "description": "Run a shell command.",
      "input_schema": {"type": "object", "properties": {"command": {"type": "string"}}, "required": ["command"]}},
@@ -221,6 +250,7 @@ TOOLS = [
      "input_schema": {"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]}},
 ]
 
+# Tool的分发
 TOOL_HANDLERS = {
     "bash": run_bash,
     "read_file": run_read,
@@ -322,14 +352,15 @@ def summary_hook(messages: list):
     print(f"\033[90m[HOOK] Stop: session used {tool_count} tool calls\033[0m")
     return None
 
-
+# 注册HOOK
 register_hook("UserPromptSubmit", context_inject_hook)
 register_hook("PreToolUse", permission_hook)
 register_hook("PreToolUse", log_hook)
 register_hook("PostToolUse", large_output_hook)
 register_hook("Stop", summary_hook)
 
-
+# 执行Tool(load_skill操作也会在此进行,渐进式披露SKILL)
+# SKILL渐进式加载会使用SkillLoader类中的load方法,返回SKILL.Content
 def execute_tool(block) -> str:
     blocked = trigger_hooks("PreToolUse", block)
     if blocked:
@@ -347,6 +378,7 @@ def execute_tool(block) -> str:
 
 def agent_loop(messages: list):
     while True:
+        # Messages保存历史会话记录,每次调用API都会发送
         response = client.messages.create(
             model=MODEL,
             system=SYSTEM,
