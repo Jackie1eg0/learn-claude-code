@@ -5,6 +5,10 @@ s06_subagent.py - Subagents
 The task tool runs a second agent loop with a fresh message list. Both
 loops share the working directory, but only the final text returns to
 the parent conversation.
+    ========= Task工具会派生出SubAgent,其核心也是个Agent Loop =========
+    SubAgent和主Agent共享工作区、HOOKs以及权限检查,SubAgent向主Agent汇报最终文本
+    无需向主Agent传递子任务执行中调用的Tool_Result以及对话Messages
+    ===============================================================
 
     Parent agent                    Subagent
     +------------------+            +------------------+
@@ -53,6 +57,7 @@ SYSTEM = (
     f"You are a coding agent at {WORKDIR}. Environment: {ENVIRONMENT_PROMPT}. "
     "Use task for focused exploration or a self-contained subtask."
 )
+# SubAgent的SystemPrompt,要完成派发的子任务,并返回简洁的终极回答。
 SUB_SYSTEM = (
     f"You are a coding agent at {WORKDIR}. Environment: {ENVIRONMENT_PROMPT}. "
     "Complete the given task, then return a concise final answer."
@@ -133,7 +138,7 @@ BASE_TOOLS = [
     {"name": "glob", "description": "Find files matching a glob pattern; ** matches recursively.",
      "input_schema": {"type": "object", "properties": {"pattern": {"type": "string"}}, "required": ["pattern"]}},
 ]
-
+# 分发工具,把Tool_Name和实际执行的Tool_Func()对应起来
 BASE_HANDLERS = {
     "bash": run_bash,
     "read_file": run_read,
@@ -146,7 +151,8 @@ BASE_HANDLERS = {
 # -- Hooks --
 
 HOOKS = {"UserPromptSubmit": [], "PreToolUse": [], "PostToolUse": [], "Stop": []}
-
+# Event遇到特定的匹配条件,符合就自动触发HOOKS,具有强制性和稳定性
+# CallBack为触发HOOK时，具体的处理步骤
 
 def register_hook(event: str, callback):
     HOOKS[event].append(callback)
@@ -154,7 +160,8 @@ def register_hook(event: str, callback):
 
 def trigger_hooks(event: str, *args):
     for callback in HOOKS[event]:
-        result = callback(*args)
+        result = callback(*args)    
+        # 将args传入callBack中,匹配触发返回非None结果
         if result is not None:
             return result
     return None
@@ -172,6 +179,7 @@ def contains_destructive_command(command: str) -> bool:
 
 
 def permission_hook(block):
+    # Tool使用权限控制的HOOKS,用于PreToolUse事件,判断操作是否有风险
     """PreToolUse: block denied operations and ask about risky ones."""
     if block.name == "bash":
         command = block.input.get("command", "")
@@ -234,7 +242,7 @@ def summary_hook(messages: list):
     print(f"\033[90m[HOOK] Stop: session used {tool_count} tool calls\033[0m")
     return None
 
-
+# HOOKS注册,为对应Event绑定HOOKS,条件满足时自动触发
 register_hook("UserPromptSubmit", context_inject_hook)
 register_hook("PreToolUse", permission_hook)
 register_hook("PreToolUse", log_hook)
@@ -243,12 +251,14 @@ register_hook("Stop", summary_hook)
 
 
 def execute_tool(block, handlers: dict) -> str:
+    # 执行工具前,先确认权限,是否要阻塞工具执行
     blocked = trigger_hooks("PreToolUse", block)
     if blocked:
         return str(blocked)
 
     handler = handlers.get(block.name)
     try:
+        # 关键字传参,在TOOLS中的Input_Schema中说明了参数的结构,LLM会提供正确格式
         output = handler(**block.input) if handler else f"Unknown: {block.name}"
     except Exception as e:
         output = f"Error: {e}"
@@ -264,6 +274,7 @@ SUB_HANDLERS = dict(BASE_HANDLERS)
 
 
 def extract_text(content) -> str:
+    # 把SubAgent最后一轮回复中的文本块拼接成字符串,Task的Tool_Result就是这串String
     if not isinstance(content, list):
         return str(content)
     return "\n".join(
@@ -276,8 +287,10 @@ def extract_text(content) -> str:
 def run_subagent(prompt: str) -> str:
     print("\n\033[35m[Subagent started]\033[0m")
     messages = [{"role": "user", "content": prompt}]
+    # 创建Fresh Context全新上下文    
 
     for _ in range(30):
+    # SubAgent只允许30轮次的Messages,若超过会返回String,提示without final answer
         response = client.messages.create(
             model=MODEL,
             system=SUB_SYSTEM,
@@ -291,11 +304,13 @@ def run_subagent(prompt: str) -> str:
             block for block in response.content if block.type == "tool_use"
         ]
         if not tool_calls:
+        # 按照AgentLoop逻辑,没调用TOOLS时,SubAgent已经生成最终回答
             force = trigger_hooks("Stop", messages)
             if force:
                 messages.append({"role": "user", "content": force})
                 continue
             print("\033[35m[Subagent done]\033[0m")
+            # 将SubAgent的最终回答提取出来,返回给Parent Agent
             return extract_text(response.content) or "(no summary)"
 
         results = []
@@ -308,11 +323,13 @@ def run_subagent(prompt: str) -> str:
                 "content": output,
             })
         messages.append({"role": "user", "content": results})
-
+        # 继续在SubAgent向LLM返回Tool_Result,进行下一轮对话
+    
+    # 超过30轮次SubAgent还未返回最终回答, ForLoop结束循环
     print("\033[35m[Subagent stopped]\033[0m")
     return "Subagent stopped after 30 turns without a final answer."
 
-
+# Task_Tool符合Claude API的工具描述
 TASK_TOOL = {
     "name": "task",
     "description": "Run a subagent with fresh conversation context and return its final text.",
@@ -323,6 +340,9 @@ TASK_TOOL = {
     },
 }
 
+# *和**都表示解包,前者把可迭代对象(如list)中元素逐个放进新列表中;
+# 后者把字典中的键值对逐对放进新字典中;
+# 主Agent相比SubAgent多了Task_Tool这一工具,以便派生SubAgent
 TOOLS = [*BASE_TOOLS, TASK_TOOL]
 TOOL_HANDLERS = {**BASE_HANDLERS, "task": run_subagent}
 
@@ -352,6 +372,8 @@ def agent_loop(messages: list):
 
         results = []
         for block in tool_calls:
+            # Task_Tool(派生SubAgent)也会在此处执行
+            # SubAgent中子任务执行的最终结果也以Tool_Result形式返回给主Agent
             output = execute_tool(block, TOOL_HANDLERS)
             results.append({
                 "type": "tool_result",
